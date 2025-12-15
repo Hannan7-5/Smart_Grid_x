@@ -1,6 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Zap, AlertTriangle, ShieldCheck, Server, Thermometer, Wifi } from 'lucide-react';
+import { 
+  AreaChart, 
+  Area, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  defs,
+  linearGradient,
+  stop 
+} from 'recharts';
+import { 
+  Activity, 
+  Zap, 
+  AlertTriangle, 
+  ShieldCheck, 
+  Server, 
+  Thermometer, 
+  Wifi, 
+  Home,
+  Clock,
+  Battery
+} from 'lucide-react';
 import './App.css'; 
 
 const WS_URL = "wss://smartgridxbackend.onrender.com/ws/client"; 
@@ -14,14 +36,14 @@ const defaultSystemData = {
 // --- Helper Component: Stat Card ---
 const StatCard = ({ label, value, unit, icon: Icon, colorClass }) => (
   <div className="stat-card">
-    <div>
+    <div className="stat-content">
       <p className="stat-label">{label}</p>
-      <div style={{ display: 'flex', alignItems: 'baseline' }}>
+      <div className="stat-value-wrapper">
         <span className="stat-value">{value}</span>
         <span className="stat-unit">{unit}</span>
       </div>
     </div>
-    <div className={`icon-wrapper ${colorClass}`}>
+    <div className={`icon-badge ${colorClass}`}>
       <Icon size={20} />
     </div>
   </div>
@@ -29,17 +51,15 @@ const StatCard = ({ label, value, unit, icon: Icon, colorClass }) => (
 
 // --- Helper Component: Relay Button ---
 const RelayButton = ({ index, state, onClick }) => (
-  <button
-    onClick={() => onClick(index, !state)}
+  <button 
+    onClick={() => onClick(index, !state)} 
     className={`relay-btn ${state ? 'active' : ''}`}
   >
     <div className="relay-info">
-      <div className="relay-dot" />
+      <div className={`relay-dot ${state ? 'on' : 'off'}`} />
       <span className="relay-name">Circuit {index + 1}</span>
     </div>
-    <div className="relay-status">
-      {state ? 'ON' : 'OFF'}
-    </div>
+    <span className="relay-status-text">{state ? 'ON' : 'OFF'}</span>
   </button>
 );
 
@@ -48,6 +68,7 @@ const App = () => {
   const [systemData, setSystemData] = useState(defaultSystemData);
   const [trendData, setTrendData] = useState([]);
 
+  // --- WebSocket Connection ---
   useEffect(() => {
     let ws;
     const connect = () => {
@@ -58,6 +79,7 @@ const App = () => {
                 const payload = JSON.parse(event.data);
                 if (payload.type === "update") {
                     setSystemData(payload.data);
+                    // Update Chart Data (Keep last 20 points)
                     setTrendData(prev => {
                       const newData = [...prev, {
                           time: new Date().toLocaleTimeString(),
@@ -75,6 +97,7 @@ const App = () => {
     return () => { if (ws) ws.close(); };
   }, []);
 
+  // --- Relay Toggle Handler ---
   const toggleRelay = (index, newState) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ action: "set_relay", relay_index: index, state: newState }));
@@ -90,96 +113,114 @@ const App = () => {
   return (
     <div className="dashboard-container">
       
-      {/* HEADER */}
+      {/* --- HEADER --- */}
       <header className="app-header">
         <div className="header-brand">
-          <div className="brand-icon"><Activity size={28} /></div>
-          <div className="header-title">
+          <div className="brand-icon-wrapper">
+            <Activity size={28} className="brand-icon" />
+          </div>
+          <div className="brand-text">
             <h1>Smart Gridx</h1>
             <p>IoT Monitoring & Predictive Maintenance</p>
           </div>
         </div>
-        <div className="status-badges">
-           <div className={`status-badge ${pole.connected ? 'online' : 'offline'}`}>
-              <Wifi size={16} /> Grid: {pole.connected ? 'Online' : 'Offline'}
+
+        <div className="header-status">
+           <div className={`status-item ${pole.connected ? 'online' : 'offline'}`}>
+              <Wifi size={16} /> 
+              <span>Grid: {pole.connected ? 'Online' : 'Offline'}</span>
            </div>
-           <div className={`status-badge ${house.connected ? 'online' : 'offline'}`}>
-              <Server size={16} /> SPAN: {house.connected ? 'Online' : 'Offline'}
+           <div className={`status-item ${house.connected ? 'online' : 'offline'}`}>
+              <Server size={16} /> 
+              <span>SPAN: {house.connected ? 'Online' : 'Offline'}</span>
            </div>
         </div>
       </header>
 
-      {/* ALERTS */}
-      <div style={{ marginTop: '1.5rem' }}>
+      {/* --- ALERTS SECTION --- */}
+      <div className="alerts-container">
         {alerts.theft_detected && (
-          <div className="alert-box danger">
-            <div style={{ background: '#fee2e2', padding: '0.5rem', borderRadius: '50%' }}><AlertTriangle size={20} /></div>
-            <div><strong>THEFT DETECTED:</strong> Power mismatch between Pole and House!</div>
+          <div className="alert-banner danger">
+            <div className="alert-icon-bg"><AlertTriangle size={20} /></div>
+            <div className="alert-content">
+                <strong>THEFT DETECTED</strong>
+                <span>Power mismatch detected between Pole and House source.</span>
+            </div>
           </div>
         )}
         {alerts.maintenance_risk && (
-          <div className="alert-box warning">
-            <div style={{ background: '#fef3c7', padding: '0.5rem', borderRadius: '50%' }}><Activity size={20} /></div>
-            <div><strong>MAINTENANCE ALERT:</strong> Risk Score {alerts.risk_score}. Check equipment.</div>
+          <div className="alert-banner warning">
+            <div className="alert-icon-bg"><Activity size={20} /></div>
+             <div className="alert-content">
+                <strong>MAINTENANCE REQUIRED</strong>
+                <span>System risk score is {alerts.risk_score}. Check equipment immediately.</span>
+            </div>
           </div>
         )}
       </div>
 
-      {/* MAIN GRID */}
-      <div className="main-grid">
+      {/* --- MAIN GRID LAYOUT --- */}
+      <main className="main-grid">
         
-        {/* LEFT COLUMN: POLE */}
-        <div className="column">
+        {/* --- LEFT COLUMN: POLE --- */}
+        <section className="panel-section">
           <div className="section-header">
-            <Zap size={20} color="#94a3b8" />
+            <Zap className="section-icon" size={20} />
             <h2>Grid Source (Pole)</h2>
           </div>
+
           <div className="stats-grid">
             <StatCard label="Voltage" value={(pole.voltage || 0).toFixed(1)} unit="V" icon={Zap} colorClass="amber" />
             <StatCard label="Power" value={(pole.power || 0).toFixed(0)} unit="W" icon={Activity} colorClass="amber" />
-            <StatCard label="Frequency" value={(pole.frequency || 0).toFixed(1)} unit="Hz" icon={Activity} colorClass="blue" />
-            <StatCard label="PF" value={(pole.pf || 0).toFixed(2)} unit="" icon={ShieldCheck} colorClass="emerald" />
+            <StatCard label="Frequency" value={(pole.frequency || 0).toFixed(1)} unit="Hz" icon={Clock} colorClass="blue" />
+            <StatCard label="PF" value={(pole.pf || 0).toFixed(2)} unit="" icon={ShieldCheck} colorClass="green" />
           </div>
 
-          <div className="chart-card">
-            <h3 className="chart-title">Real-time Power Trend</h3>
-            <ResponsiveContainer width="100%" height="90%">
-              <AreaChart data={trendData}>
-                <defs>
-                  <linearGradient id="colorGrid" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8}/><stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorHouse" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/><stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="time" hide />
-                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                <Area type="monotone" dataKey="grid" stroke="#f59e0b" fillOpacity={1} fill="url(#colorGrid)" strokeWidth={2} />
-                <Area type="monotone" dataKey="house" stroke="#3b82f6" fillOpacity={1} fill="url(#colorHouse)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
+          {/* REAL CHART */}
+          <div className="card-container chart-container">
+            <h3>Real-time Power Trend</h3>
+            <div style={{ width: '100%', height: 250 }}>
+                <ResponsiveContainer>
+                <AreaChart data={trendData}>
+                    <defs>
+                    <linearGradient id="colorGrid" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorHouse" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="time" hide />
+                    <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                    <Area type="monotone" dataKey="grid" stroke="#f59e0b" fillOpacity={1} fill="url(#colorGrid)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="house" stroke="#3b82f6" fillOpacity={1} fill="url(#colorHouse)" strokeWidth={2} />
+                </AreaChart>
+                </ResponsiveContainer>
+            </div>
           </div>
-        </div>
+        </section>
 
-        {/* RIGHT COLUMN: HOUSE */}
-        <div className="column">
+        {/* --- RIGHT COLUMN: HOUSE & AI --- */}
+        <section className="panel-section">
           <div className="section-header">
-            <Server size={20} color="#94a3b8" />
+            <Server className="section-icon" size={20} />
             <h2>Smart Home (SPAN Panel)</h2>
           </div>
           
           <div className="stats-grid">
-            <StatCard label="Consumption" value={(house.power || 0).toFixed(0)} unit="W" icon={Zap} colorClass="blue" />
-            <StatCard label="Current" value={(house.current || 0).toFixed(2)} unit="A" icon={Activity} colorClass="blue" />
-            <StatCard label="Temperature" value={(house.temperature || 0).toFixed(1)} unit="°C" icon={Thermometer} colorClass={house.temperature > 40 ? "red" : "emerald"} />
-            <StatCard label="Energy" value={(house.energy || 0).toFixed(2)} unit="kWh" icon={Zap} colorClass="purple" />
+            <StatCard label="Consumption" value={(house.power || 0).toFixed(0)} unit="W" icon={Home} colorClass="blue" />
+            <StatCard label="Current" value={(house.current || 0).toFixed(2)} unit="A" icon={Battery} colorClass="purple" />
+            <StatCard label="Temperature" value={(house.temperature || 0).toFixed(1)} unit="°C" icon={Thermometer} colorClass={house.temperature > 40 ? "red" : "green"} />
+            <StatCard label="Energy" value={(house.energy || 0).toFixed(2)} unit="kWh" icon={Zap} colorClass="orange" />
           </div>
 
-          <div className="relay-card">
-            <h3 className="chart-title" style={{ marginBottom: '1rem' }}>Circuit Control</h3>
+          {/* RELAY CONTROL */}
+          <div className="card-container relay-container">
+            <h3>Circuit Control</h3>
             <div className="relay-grid">
               {(house.relays || [false, false, false, false]).map((state, idx) => (
                 <RelayButton key={idx} index={idx} state={state} onClick={toggleRelay} />
@@ -187,30 +228,33 @@ const App = () => {
             </div>
           </div>
 
-          <div className="ai-card">
-             <div className="ai-header">AI Health Monitor</div>
-             <div className="ai-stats">
-               <div>
-                 <div className="risk-value">{alerts.risk_score || 0}</div>
-                 <div className="risk-label">Risk Probability (Px)</div>
-               </div>
-               <div className="ai-status">
-                 <div className={`status-text ${alerts.maintenance_risk ? 'bad' : 'ok'}`}>
-                   {alerts.maintenance_risk ? 'MAINTENANCE NEEDED' : 'OPTIMAL'}
+          {/* AI HEALTH MONITOR */}
+          <div className="card-container ai-card">
+              <div className="ai-header-row">
+                  <h3>AI Health Monitor</h3>
+                  <div className={`ai-badge ${alerts.maintenance_risk ? 'bad' : 'good'}`}>
+                      {alerts.maintenance_risk ? 'RISK DETECTED' : 'SYSTEM OPTIMAL'}
+                  </div>
+              </div>
+
+              <div className="ai-body">
+                 <div className="risk-metric">
+                    <span className="risk-score">{(alerts.risk_score || 0).toFixed(2)}</span>
+                    <span className="risk-label">Failure Probability (Px)</span>
                  </div>
-                 <div className="status-msg">{alerts.message}</div>
-               </div>
-             </div>
-             <div className="progress-bar">
-               <div 
-                 className={`progress-fill ${alerts.maintenance_risk ? 'bad' : 'ok'}`}
-                 style={{ width: `${Math.min((alerts.risk_score || 0) * 100, 100)}%` }}
-               />
-             </div>
+                 <p className="ai-message">{alerts.message}</p>
+                 
+                 <div className="ai-progress-track">
+                    <div 
+                        className={`ai-progress-fill ${alerts.maintenance_risk ? 'bad' : 'good'}`}
+                        style={{ width: `${Math.min((alerts.risk_score || 0) * 100, 100)}%` }}
+                    />
+                 </div>
+              </div>
           </div>
 
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 };
