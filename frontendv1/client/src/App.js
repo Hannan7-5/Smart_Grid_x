@@ -6,6 +6,35 @@ import { Activity, Zap, AlertTriangle, ShieldCheck, Server, Thermometer, Wifi } 
 // SECURE WebSocket URL for Render (wss://)
 const WS_URL = "wss://smartgridxbackend.onrender.com/ws/client"; 
 
+// ================= DEFAULT DATA (Initial State) =================
+const defaultSystemData = {
+  pole: {
+    connected: false,
+    voltage: 0,
+    power: 0,
+    current: 0,
+    energy: 0,
+    frequency: 0,
+    pf: 0
+  },
+  house: {
+    connected: false,
+    voltage: 0,
+    power: 0,
+    current: 0,
+    energy: 0,
+    temperature: 0,
+    pf: 0,
+    relays: [false, false, false, false]
+  },
+  alerts: {
+    theft_detected: false,
+    maintenance_risk: false,
+    risk_score: 0,
+    message: "Waiting for connection..."
+  }
+};
+
 // ================= COMPONENT: GAUGE CARD =================
 const StatCard = ({ label, value, unit, icon: Icon, color }) => (
   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
@@ -47,37 +76,55 @@ const RelayButton = ({ index, state, onClick }) => (
 // ================= MAIN APP =================
 const App = () => {
   const [socket, setSocket] = useState(null);
-  const [systemData, setSystemData] = useState(null);
+  // Initialize with default data so UI renders immediately
+  const [systemData, setSystemData] = useState(defaultSystemData);
   const [trendData, setTrendData] = useState([]);
 
   // WebSocket Connection
   useEffect(() => {
-    const ws = new WebSocket(WS_URL);
+    let ws;
+    const connect = () => {
+        ws = new WebSocket(WS_URL);
 
-    ws.onopen = () => {
-      console.log("Connected to Backend");
-      setSocket(ws);
+        ws.onopen = () => {
+            console.log("Connected to Backend");
+            setSocket(ws);
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload.type === "update") {
+                    setSystemData(payload.data);
+                    
+                    // Update Chart Data (Keep last 20 points)
+                    setTrendData(prev => {
+                    const newData = [...prev, {
+                        time: new Date().toLocaleTimeString(),
+                        grid: payload.data.pole.power,
+                        house: payload.data.house.power
+                    }];
+                    return newData.slice(-20);
+                    });
+                }
+            } catch (e) {
+                console.error("Error parsing WS message", e);
+            }
+        };
+
+        ws.onclose = () => {
+            console.log("Disconnected. Reconnecting...");
+            setSocket(null);
+            // Optional: Reconnect logic could go here
+            // setTimeout(connect, 3000); 
+        };
     };
 
-    ws.onmessage = (event) => {
-      const payload = JSON.parse(event.data);
-      if (payload.type === "update") {
-        setSystemData(payload.data);
-        
-        // Update Chart Data (Keep last 20 points)
-        setTrendData(prev => {
-          const newData = [...prev, {
-            time: new Date().toLocaleTimeString(),
-            grid: payload.data.pole.power,
-            house: payload.data.house.power
-          }];
-          return newData.slice(-20);
-        });
-      }
-    };
+    connect();
 
-    ws.onclose = () => setSocket(null);
-    return () => ws.close();
+    return () => {
+        if (ws) ws.close();
+    };
   }, []);
 
   const toggleRelay = (index, newState) => {
@@ -88,19 +135,15 @@ const App = () => {
         state: newState
       };
       socket.send(JSON.stringify(cmd));
+    } else {
+        alert("System Offline: Cannot toggle relays.");
     }
   };
 
-  if (!systemData) return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">
-      <div className="flex flex-col items-center gap-4">
-        <Zap className="animate-bounce text-amber-500" size={48} />
-        <p>Connecting to Smart Gridx...</p>
-      </div>
-    </div>
-  );
-
-  const { pole, house, alerts } = systemData;
+  // Destructure safe values (fallback to defaults if partial data comes in)
+  const pole = systemData.pole || defaultSystemData.pole;
+  const house = systemData.house || defaultSystemData.house;
+  const alerts = systemData.alerts || defaultSystemData.alerts;
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-800">
@@ -118,12 +161,12 @@ const App = () => {
             </div>
           </div>
           <div className="flex gap-4">
-             <div className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 border
-              ${pole.connected ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+             <div className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 border transition-colors duration-300
+              ${pole.connected ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
                 <Wifi size={16} /> Grid Node: {pole.connected ? 'Online' : 'Offline'}
              </div>
-             <div className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 border
-              ${house.connected ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+             <div className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 border transition-colors duration-300
+              ${house.connected ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
                 <Server size={16} /> SPAN Panel: {house.connected ? 'Online' : 'Offline'}
              </div>
           </div>
@@ -160,10 +203,10 @@ const App = () => {
               <h2 className="text-lg font-bold text-slate-700">Grid Source (Pole)</h2>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <StatCard label="Input Voltage" value={pole.voltage.toFixed(1)} unit="V" icon={Zap} color="text-amber-500 bg-amber-500" />
-              <StatCard label="Grid Power" value={pole.power.toFixed(0)} unit="W" icon={Activity} color="text-amber-500 bg-amber-500" />
-              <StatCard label="Frequency" value={pole.frequency.toFixed(1)} unit="Hz" icon={Activity} color="text-blue-500 bg-blue-500" />
-              <StatCard label="Power Factor" value={pole.pf.toFixed(2)} unit="" icon={ShieldCheck} color="text-emerald-500 bg-emerald-500" />
+              <StatCard label="Input Voltage" value={(pole.voltage || 0).toFixed(1)} unit="V" icon={Zap} color="text-amber-500 bg-amber-500" />
+              <StatCard label="Grid Power" value={(pole.power || 0).toFixed(0)} unit="W" icon={Activity} color="text-amber-500 bg-amber-500" />
+              <StatCard label="Frequency" value={(pole.frequency || 0).toFixed(1)} unit="Hz" icon={Activity} color="text-blue-500 bg-blue-500" />
+              <StatCard label="Power Factor" value={(pole.pf || 0).toFixed(2)} unit="" icon={ShieldCheck} color="text-emerald-500 bg-emerald-500" />
             </div>
 
             {/* CHART */}
@@ -203,17 +246,17 @@ const App = () => {
             
             {/* HOUSE STATS */}
             <div className="grid grid-cols-2 gap-4">
-              <StatCard label="Consumption" value={house.power.toFixed(0)} unit="W" icon={Zap} color="text-blue-500 bg-blue-500" />
-              <StatCard label="Current Draw" value={house.current.toFixed(2)} unit="A" icon={Activity} color="text-blue-500 bg-blue-500" />
-              <StatCard label="Temperature" value={house.temperature.toFixed(1)} unit="°C" icon={Thermometer} color={house.temperature > 40 ? "text-red-500 bg-red-500" : "text-emerald-500 bg-emerald-500"} />
-              <StatCard label="Total Energy" value={house.energy.toFixed(2)} unit="kWh" icon={Zap} color="text-purple-500 bg-purple-500" />
+              <StatCard label="Consumption" value={(house.power || 0).toFixed(0)} unit="W" icon={Zap} color="text-blue-500 bg-blue-500" />
+              <StatCard label="Current Draw" value={(house.current || 0).toFixed(2)} unit="A" icon={Activity} color="text-blue-500 bg-blue-500" />
+              <StatCard label="Temperature" value={(house.temperature || 0).toFixed(1)} unit="°C" icon={Thermometer} color={(house.temperature || 0) > 40 ? "text-red-500 bg-red-500" : "text-emerald-500 bg-emerald-500"} />
+              <StatCard label="Total Energy" value={(house.energy || 0).toFixed(2)} unit="kWh" icon={Zap} color="text-purple-500 bg-purple-500" />
             </div>
 
             {/* RELAY CONTROLS */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
               <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">Circuit Control (SPAN Relays)</h3>
               <div className="grid grid-cols-2 gap-4">
-                {house.relays.map((state, idx) => (
+                {(house.relays || [false, false, false, false]).map((state, idx) => (
                   <RelayButton 
                     key={idx} 
                     index={idx} 
@@ -230,21 +273,21 @@ const App = () => {
                <h3 className="text-sm font-bold text-slate-400 uppercase mb-2">AI Health Monitor</h3>
                <div className="flex items-end justify-between">
                  <div>
-                   <p className="text-3xl font-bold">{alerts.risk_score}</p>
+                   <p className="text-3xl font-bold">{alerts.risk_score || 0}</p>
                    <p className="text-xs text-slate-400">Risk Probability (Px)</p>
                  </div>
                  <div className="text-right">
                    <p className={`font-bold ${alerts.maintenance_risk ? 'text-orange-400' : 'text-emerald-400'}`}>
                      {alerts.maintenance_risk ? 'MAINTENANCE NEEDED' : 'OPTIMAL CONDITION'}
                    </p>
-                   <p className="text-xs text-slate-500">{systemData.alerts.message}</p>
+                   <p className="text-xs text-slate-500">{alerts.message}</p>
                  </div>
                </div>
                {/* Health Bar */}
                <div className="w-full h-2 bg-slate-700 rounded-full mt-4 overflow-hidden">
                  <div 
                    className={`h-full transition-all duration-500 ${alerts.maintenance_risk ? 'bg-orange-500' : 'bg-emerald-500'}`}
-                   style={{ width: `${Math.min(alerts.risk_score * 100, 100)}%` }}
+                   style={{ width: `${Math.min((alerts.risk_score || 0) * 100, 100)}%` }}
                  />
                </div>
             </div>
