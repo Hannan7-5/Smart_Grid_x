@@ -1,79 +1,84 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import { Wifi, Activity, Zap, FileText, Database, TrendingUp, Power } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 // =================================================================
 // *** CRITICAL: UPDATE THIS WITH YOUR RENDER WSS URL ***
 // Your Backend URL: wss://smart-grid-x9.onrender.com/ws/client
 // =================================================================
-const WS_URL = "wss://smart-grid-x9.onrender.com/ws/client";
+const WS_URL = "wss://smart-grid-x9.onrender.com/ws/client"; 
+const MAX_DATA_POINTS = 30; // Limit graph history to 30 points
 
 const App = () => {
-  // State to hold live data received from the backend
+  // State to hold live data from the backend
   const [data, setData] = useState({
     pole: { voltage: 0, current: 0, power: 0, energy: 0, connected: false, last_seen: null },
     alerts: { message: "Connecting to Backend..." }
   });
+  
+  // State to hold historical data for charting
+  const [chartData, setChartData] = useState([]);
 
-  // WebSocket Connection Logic (MODIFIED to listen for 'report_ready')
+  // WebSocket Connection Logic
   useEffect(() => {
     let ws;
 
     const connect = () => {
-      ws = new WebSocket(WS_URL);
-      
-      ws.onopen = () => {
-        console.log('Connected to WebSocket server');
-      };
+        ws = new WebSocket(WS_URL);
+        
+        ws.onmessage = (event) => {
+            const payload = JSON.parse(event.data);
+            
+            if (payload.type === "update") {
+                const newData = payload.data;
+                setData(newData);
 
-      ws.onmessage = (event) => {
-        const payload = JSON.parse(event.data);
-        if (payload.type === "update") {
-          // Update the state with the latest data from the backend
-          setData(payload.data);
-        } else if (payload.type === "report_ready") {
-          // When backend says report is ready, trigger the download
-          console.log("Report is ready! Downloading from:", payload.url);
-          window.open(payload.url, '_blank');
-        }
-      };
+                // Add new data point to history for charting
+                setChartData(prevChartData => {
+                    const currentTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    
+                    // Format data point for Recharts
+                    const newPoint = {
+                        time: currentTime,
+                        voltage: newData.pole.voltage,
+                        current: newData.pole.current,
+                        energy: newData.pole.energy, // Total cumulative energy
+                        power: newData.pole.power // Active Power
+                    };
 
-      ws.onclose = (event) => {
-        console.log('Disconnected. Attempting reconnect in 5s...', event.reason);
-        // Attempt to reconnect after a delay
-        setTimeout(connect, 5000);
-      };
+                    // Append new point and limit array size
+                    const updatedData = [...prevChartData, newPoint];
+                    if (updatedData.length > MAX_DATA_POINTS) {
+                        updatedData.shift(); // Remove the oldest point
+                    }
+                    return updatedData;
+                });
+            } else if (payload.type === "report_ready") {
+                // Handle PDF Download
+                window.open(payload.url, '_blank');
+            }
+        };
 
-      ws.onerror = (err) => {
-        console.error('Socket error:', err);
-        ws.close();
-      };
+        ws.onclose = () => { setTimeout(connect, 5000); };
+        ws.onerror = (err) => { console.error('Socket error:', err); ws.close(); };
+        ws.onopen = () => { console.log('Connected to WebSocket server'); };
     };
 
     connect();
-
-    // Clean up function: close the WebSocket when the component unmounts
-    return () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-    };
+    return () => ws && ws.close();
   }, []);
 
   const generateReport = () => {
     const ws = new WebSocket(WS_URL);
     ws.onopen = () => {
-      // 1. Send command to backend via WebSocket
-      ws.send(JSON.stringify({ action: "generate_report" }));
-      alert("Request sent to server. Download will start shortly!");
-      ws.close();
+        ws.send(JSON.stringify({ action: "generate_report" }));
+        alert("Request sent to server. Download will start shortly!");
     };
-    // Note: The download logic is now handled inside the ws.onmessage listener in useEffect
   };
 
   const { pole, alerts } = data;
 
-  // Function to calculate and format Last Seen time
   const formatLastSeen = (timestamp) => {
     if (!timestamp) return 'Never';
     const lastSeen = new Date(timestamp);
@@ -86,9 +91,38 @@ const App = () => {
     return lastSeen.toLocaleTimeString();
   };
 
+
+  // --- Helper Component for Charts ---
+  const ChartCard = ({ title, dataKey, unit, color }) => (
+    <div className="chart-card">
+        <h3>{title}</h3>
+        <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                <XAxis dataKey="time" hide={true} />
+                <YAxis unit={unit} domain={[dataKey === 'voltage' ? 200 : 0, 'auto']} />
+                <Tooltip 
+                    formatter={(value) => [`${value.toFixed(2)} ${unit}`, dataKey]} 
+                    labelFormatter={(label) => `Time: ${label}`}
+                />
+                <Legend layout="horizontal" verticalAlign="top" align="right" />
+                <Line 
+                    type="monotone" 
+                    dataKey={dataKey} 
+                    name={dataKey.charAt(0).toUpperCase() + dataKey.slice(1)} 
+                    stroke={color} 
+                    dot={false}
+                    strokeWidth={2}
+                />
+            </LineChart>
+        </ResponsiveContainer>
+    </div>
+  );
+
+
   return (
     <div className="dashboard">
-      {/* Header */}
+      {/* Header and Status */}
       <header className="header">
         <div className="brand">
           <Activity className="icon" />
@@ -100,7 +134,6 @@ const App = () => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main>
         {/* Status Banner */}
         <div className="banner">
@@ -108,7 +141,7 @@ const App = () => {
           <span>System Alert: **{alerts.message}** | Last Data Update: {formatLastSeen(pole.last_seen)}</span>
         </div>
 
-        {/* Data Cards */}
+        {/* Data Cards (Unchanged) */}
         <div className="grid">
           <div className="card">
             <TrendingUp size={30} className="card-icon" />
@@ -131,8 +164,18 @@ const App = () => {
             <div className="value">{pole.energy.toFixed(3)} <span className="unit">kWh</span></div>
           </div>
         </div>
+        
+        {/* REAL-TIME CHARTS SECTION */}
+        <div className="charts-section">
+            <h2>Real-Time Performance Graphs</h2>
+            <div className="charts-grid">
+                <ChartCard title="Voltage (V)" dataKey="voltage" unit="V" color="#057a55" />
+                <ChartCard title="Current (A)" dataKey="current" unit="A" color="#f97316" />
+                <ChartCard title="Active Power (W)" dataKey="power" unit="W" color="#3b82f6" />
+            </div>
+        </div>
 
-        {/* Table View */}
+        {/* Table View (Unchanged) */}
         <div className="table-container">
           <h2>Live Readings</h2>
           <table>
@@ -167,7 +210,7 @@ const App = () => {
           </table>
         </div>
 
-        {/* Report Button */}
+        {/* Report Button (Unchanged) */}
         <div className="actions">
           <button className="btn-report" onClick={generateReport}>
             <FileText size={20} />
