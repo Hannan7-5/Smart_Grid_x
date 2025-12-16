@@ -2,211 +2,146 @@ import json
 import asyncio
 import logging
 from typing import Dict, List
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
+import asyncpg 
 
-# --- DATABASE SETUP ---
-# NOTE: You MUST replace this with your actual Neon connection string.
-# Format: postgresql+asyncpg://[user]:[password]@[host]:[port]/[database]
-NEON_DATABASE_URL = "postgresql+asyncpg://user:password@host:port/database" 
+# --- 1. CONFIGURATION ---
+# *** YOUR SPECIFIC NEON CONNECTION STRING PLUGGED IN ***
+NEON_DATABASE_URL = "postgresql://neondb_owner:npg_HeVoMQg56aCW@ep-withered-salad-ahigt95d-pooler.c-3.us-east-1.aws.neon.tech:5432/neondb?sslmode=require"
 
-# You would typically set up your ORM or connection pool here (e.g., SQLAlchemy/asyncpg)
-# For this quick test, we will use a simplified placeholder function.
+# --- 2. SETUP APP ---
+app = FastAPI(title="Smart Gridx Backend")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("SmartGridx")
 
-async def save_to_db(data: dict):
-    """
-    Placeholder function to simulate saving data to Neon DB.
-    In a full app, you would use an async PostgreSQL library (like asyncpg) here.
-    """
-    try:
-        # 1. Connect to DB (using placeholder print for now)
-        # conn = await asyncpg.connect(NEON_DATABASE_URL)
-        
-        # 2. Execute INSERT (Example SQL for a 'readings' table)
-        # await conn.execute(
-        #     'INSERT INTO readings(timestamp, voltage, current, energy) VALUES($1, $2, $3, $4)',
-        #     datetime.now().isoformat(), data["voltage"], data["current"], data["energy"]
-        # )
-        
-        # 3. Close connection
-        # await conn.close()
-        
-        logger.info(f"DB PLACEHOLDER: Data ready to save: V={data['voltage']:.1f}, E={data['energy']:.3f} kWh")
-        
-    except Exception as e:
-        # Catch connection/insertion errors
-        logger.error(f"DB Save Error (Check NEON_DATABASE_URL and table schema): {e}")
-
-
-# --- FASTAPI APP SETUP ---
-app = FastAPI(title="Smart Gridx Simplified Backend")
-
-# Allow CORS for React Frontend (Update origins if needed)
+# --- 2.1. CORS Policy (Crucial for Local Frontend Development) ---
+# Add your Render hostname and common local development ports (3000 & 5173)
 origins = [
-    "http://localhost:5173",          # Local Development
-    "https://YOUR_RENDER_HOSTNAME_HERE" # Replace with your deployed frontend URL
+    "https://smart-grid-x9.onrender.com", 
+    "http://localhost:3000",          # Standard React Dev Port
+    "http://localhost:5173",          # Standard Vite/Modern Dev Port
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "*" # Safety net for other hosts
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # For simplicity, allowing all during initial setup
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Logger setup
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("SmartGridx")
-
-# ================= SIMPLIFIED STATE MANAGEMENT =================
-# We only track the pole node
+# Global State (Live Data)
 system_state = {
-    "pole": {
-        "connected": False,
-        "voltage": 0.0,
-        "current": 0.0,
-        "power": 0.0,
-        "energy": 0.0,
-        "last_seen": None
-    },
-    "alerts": {
-        "message": "Waiting for Node Connection"
-    }
+    "pole": { "connected": False, "voltage": 0, "current": 0, "power": 0, "energy": 0, "last_seen": None },
+    "alerts": { "message": "Waiting for Node..." }
 }
 
-# ================= WEBSOCKET MANAGER =================
+# --- 3. DATABASE FUNCTION ---
+async def save_to_db(data: dict):
+    """Saves live readings to Neon PostgreSQL"""
+    conn = None
+    try:
+        conn = await asyncpg.connect(NEON_DATABASE_URL)
+        
+        await conn.execute('''
+            INSERT INTO readings(voltage, current, power, energy, timestamp)
+            VALUES($1, $2, $3, $4, $5)
+        ''', data['voltage'], data['current'], data['power'], data['energy'], datetime.now())
+        
+        logger.info(f"Saved to Neon DB: {data['power']}W")
+        
+    except Exception as e:
+        logger.error(f"Database Error: {e}")
+    finally:
+        if conn:
+            await conn.close()
+
+# --- 4. CONNECTION MANAGER ---
 class ConnectionManager:
     def __init__(self):
-        self.frontend_connections: List[WebSocket] = []
-        # We only track the 'pole' hardware connection
-        self.hardware_connections: Dict[str, WebSocket] = {}
+        self.active_connections: List[WebSocket] = []
 
-    async def connect_frontend(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.frontend_connections.append(websocket)
-        logger.info("New Frontend Connected")
+        self.active_connections.append(websocket)
 
-    def disconnect_frontend(self, websocket: WebSocket):
-        if websocket in self.frontend_connections:
-            self.frontend_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
-    async def connect_hardware(self, websocket: WebSocket, device_type: str):
-        # We only expect 'pole'
-        if device_type == "pole":
-            await websocket.accept()
-            self.hardware_connections[device_type] = websocket
-            logger.info(f"Hardware Connected: {device_type}")
-            
-            # Update connection status
-            system_state["pole"]["connected"] = True
-            await self.broadcast_state()
-
-    def disconnect_hardware(self, device_type: str):
-        if device_type in self.hardware_connections:
-            del self.hardware_connections[device_type]
-            
-        if device_type == "pole":
-            system_state["pole"]["connected"] = False
-            logger.info("Pole Node Disconnected")
-            
-        # Update system message immediately after disconnect
-        self.update_system_logic()
-
-    async def broadcast_state(self):
-        # Send full system state to all frontends
-        payload = json.dumps({
-            "type": "update",
-            "timestamp": datetime.now().isoformat(),
-            "data": system_state
-        })
-        # Use asyncio.gather to send concurrently
+    async def broadcast(self):
+        payload = json.dumps({"type": "update", "data": system_state})
         await asyncio.gather(*(
             connection.send_text(payload) 
-            for connection in self.frontend_connections
-            if connection.client_state == 1 # Check if socket is open
+            for connection in self.active_connections
         ), return_exceptions=True)
-        
-    def update_system_logic(self):
-        """Minimal logic to update system message."""
-        if system_state["pole"]["connected"]:
-            system_state["alerts"]["message"] = "System Healthy - Live Data Streaming"
-        else:
-            system_state["alerts"]["message"] = "CRITICAL: Pole Node Disconnected"
-
 
 manager = ConnectionManager()
 
-# ================= ENDPOINTS =================
+# --- 5. ENDPOINTS ---
 
 @app.get("/")
-def read_root():
-    """Simple health check endpoint."""
-    return {"status": "Smart Gridx Simplified Backend Running", "pole_connected": system_state["pole"]["connected"]}
+def root():
+    return {"status": "Backend Running", "db_connected": True}
 
-# --- HARDWARE ENDPOINT (POLE) ---
+# Hardware Endpoint (ESP32 connects here)
 @app.websocket("/ws/hardware/pole")
 async def websocket_pole(websocket: WebSocket):
-    await manager.connect_hardware(websocket, "pole")
+    await websocket.accept()
+    system_state["pole"]["connected"] = True
+    logger.info("Hardware Connected: pole")
+    
     try:
         while True:
-            # 1. Receive data from ESP32
             data = await websocket.receive_text()
             payload = json.loads(data)
             
-            # 2. Update State (using only required fields V, I, P, E)
-            pole_data = {
-                "voltage": payload.get("voltage", 0.0),
-                "current": payload.get("current", 0.0),
-                "power": payload.get("power", 0.0),
-                "energy": payload.get("energy", 0.0),
-                "last_seen": datetime.now().isoformat()
+            # Extract and convert readings
+            reading = {
+                "voltage": float(payload.get("voltage", 0)),
+                "current": float(payload.get("current", 0)),
+                "power": float(payload.get("power", 0)),
+                "energy": float(payload.get("energy", 0))
             }
-            system_state["pole"].update(pole_data)
             
-            # 3. Update logic and broadcast live data to frontend
-            manager.update_system_logic()
-            await manager.broadcast_state()
+            # Update Live State
+            system_state["pole"].update(reading)
+            system_state["pole"]["last_seen"] = datetime.now().isoformat()
+            system_state["alerts"]["message"] = "Live Data Receiving"
             
-            # 4. Save data to Neon DB (for the report)
-            await save_to_db(pole_data) 
+            # Broadcast to Frontend
+            await manager.broadcast()
+            
+            # Save to Neon DB
+            await save_to_db(reading)
             
     except WebSocketDisconnect:
-        manager.disconnect_hardware("pole")
-        await manager.broadcast_state()
+        logger.warning("Pole Node Disconnected")
+        system_state["pole"]["connected"] = False
+        system_state["alerts"]["message"] = "Node Disconnected"
+        await manager.broadcast()
     except Exception as e:
-        logger.error(f"Error in pole WebSocket: {e}")
-        # Cleanly disconnect if there's a JSON/parsing error
-        manager.disconnect_hardware("pole")
-        await manager.broadcast_state()
+        logger.error(f"Error in pole WebSocket loop: {e}")
+        system_state["pole"]["connected"] = False
+        await manager.broadcast()
 
-
-# --- FRONTEND ENDPOINT (CLIENT) ---
+# Frontend Endpoint (React connects here)
 @app.websocket("/ws/client")
-async def websocket_frontend(websocket: WebSocket):
-    await manager.connect_frontend(websocket)
+async def websocket_client(websocket: WebSocket):
+    await manager.connect(websocket)
     try:
-        # Send initial state immediately
-        await manager.broadcast_state()
+        await manager.broadcast()
         
         while True:
-            # Listen for commands from React (e.g., Generate Report)
             data = await websocket.receive_text()
-            command = json.loads(data)
-            
-            if command.get("action") == "generate_report":
-                logger.info("Report generation request received from frontend.")
-                
-                # TODO: Implement database query here (using Neon DB credentials)
-                # Query all data for the last month.
-                # Use a PDF generation library (e.g., ReportLab) to create the file.
-                # Send the file back to the user or a link to the generated file.
-                
-                await websocket.send_text(json.dumps({
-                    "type": "report_status", 
-                    "message": "Report generation is in progress (DB query and PDF placeholder)."
-                }))
-            
+            cmd = json.loads(data)
+            if cmd.get("action") == "generate_report":
+                await websocket.send_text(json.dumps({"type": "alert", "msg": "Report generation feature coming soon!"}))
     except WebSocketDisconnect:
-        manager.disconnect_frontend(websocket)
+        manager.disconnect(websocket)
+        logger.info("Frontend Client Disconnected")
