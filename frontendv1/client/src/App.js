@@ -6,7 +6,7 @@ import { Wifi, Activity, Zap, FileText, Database, TrendingUp, Power } from 'luci
 // *** CRITICAL: UPDATE THIS WITH YOUR RENDER WSS URL ***
 // Your Backend URL: wss://smart-grid-x9.onrender.com/ws/client
 // =================================================================
-const WS_URL = "wss://smart-grid-x9.onrender.com/ws/client"; 
+const WS_URL = "wss://smart-grid-x9.onrender.com/ws/client";
 
 const App = () => {
   // State to hold live data received from the backend
@@ -15,46 +15,60 @@ const App = () => {
     alerts: { message: "Connecting to Backend..." }
   });
 
-  // WebSocket Connection Logic
+  // WebSocket Connection Logic (MODIFIED to listen for 'report_ready')
   useEffect(() => {
     let ws;
 
     const connect = () => {
-        ws = new WebSocket(WS_URL);
-        
-        ws.onopen = () => {
-            console.log('Connected to WebSocket server');
-        };
+      ws = new WebSocket(WS_URL);
+      
+      ws.onopen = () => {
+        console.log('Connected to WebSocket server');
+      };
 
-        ws.onmessage = (event) => {
-            const payload = JSON.parse(event.data);
-            if (payload.type === "update") {
-                // Update the state with the latest data from the backend
-                setData(payload.data);
-            }
-        };
+      ws.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === "update") {
+          // Update the state with the latest data from the backend
+          setData(payload.data);
+        } else if (payload.type === "report_ready") {
+          // When backend says report is ready, trigger the download
+          console.log("Report is ready! Downloading from:", payload.url);
+          window.open(payload.url, '_blank');
+        }
+      };
 
-        ws.onclose = (event) => {
-            console.log('Disconnected. Attempting reconnect in 5s...', event.reason);
-            // Attempt to reconnect after a delay
-            setTimeout(connect, 5000); 
-        };
+      ws.onclose = (event) => {
+        console.log('Disconnected. Attempting reconnect in 5s...', event.reason);
+        // Attempt to reconnect after a delay
+        setTimeout(connect, 5000);
+      };
 
-        ws.onerror = (err) => {
-            console.error('Socket error:', err);
-            ws.close();
-        };
+      ws.onerror = (err) => {
+        console.error('Socket error:', err);
+        ws.close();
+      };
     };
 
     connect();
 
     // Clean up function: close the WebSocket when the component unmounts
-    return () => ws.close();
+    return () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
   }, []);
 
   const generateReport = () => {
-    // In a final project, this would trigger a DB query and PDF generation on the backend.
-    alert("Report generation request sent to the backend. (Future feature: Downloads PDF from Neon data)");
+    const ws = new WebSocket(WS_URL);
+    ws.onopen = () => {
+      // 1. Send command to backend via WebSocket
+      ws.send(JSON.stringify({ action: "generate_report" }));
+      alert("Request sent to server. Download will start shortly!");
+      ws.close();
+    };
+    // Note: The download logic is now handled inside the ws.onmessage listener in useEffect
   };
 
   const { pole, alerts } = data;
