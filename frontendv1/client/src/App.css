@@ -1,36 +1,44 @@
-body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; color: #333; }
-.dashboard { max-width: 900px; margin: 0 auto; }
+/* Add to the bottom of your existing src/App.css */
 
-/* Header and Status */
-.header { display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px 30px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
-.brand { display: flex; align-items: center; gap: 10px; color: #1f2937; }
-.status { display: flex; gap: 8px; align-items: center; font-weight: 600; padding: 8px 15px; border-radius: 20px; font-size: 0.9rem; transition: background 0.3s; }
-.status.online { background: #dcfce7; color: #15803d; }
-.status.offline { background: #fecaca; color: #b91c1c; }
+.charts-section {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+}
 
-/* Banner */
-.banner { background: #bfdbfe; color: #1e40af; padding: 15px; border-radius: 8px; display: flex; align-items: center; gap: 10px; margin-bottom: 25px; border: 1px solid #93c5fd; font-weight: 500; font-size: 0.95rem; }
-.banner span { font-weight: 400; }
-.banner span strong { font-weight: 700; }
+.charts-section h2 {
+    margin-top: 0;
+    font-size: 1.5rem;
+    color: #1f2937;
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
 
-/* Data Cards */
-.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 25px; }
-.card { background: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 4px 8px rgba(0,0,0,0.05); border-left: 5px solid #a5b4fc; position: relative; }
-.card-icon { position: absolute; top: 15px; right: 15px; color: #d1d5db; }
-.card h3 { margin: 0 0 5px; color: #6b7280; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.value { font-size: 2.2rem; font-weight: 700; color: #1f2937; }
-.unit { font-size: 1rem; color: #9ca3af; font-weight: 400; }
-.card.highlight { border-left-color: #3b82f6; }
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr); /* Three charts side-by-side */
+    gap: 20px;
+}
 
-/* Table */
-.table-container { background: white; padding: 20px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
-.table-container h2 { margin-top: 0; font-size: 1.5rem; color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-th { background: #f9fafb; font-weight: 600; color: #374151; font-size: 0.9rem; }
-td { color: #374151; }
+.chart-card {
+    border: 1px solid #e5e7eb;
+    padding: 15px;
+    border-radius: 8px;
+    background: #fcfcfc;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
 
-/* Actions */
-.actions { display: flex; justify-content: center; }
-.btn-report { background: #2563eb; color: white; border: none; padding: 14px 30px; border-radius: 8px; font-size: 1rem; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.3s, transform 0.1s; font-weight: 600; box-shadow: 0 4px 6px rgba(37, 99, 235, 0.3); }
-.btn-report:hover { background: #1d4ed8; transform: translateY(-1px); }
+.chart-card h3 {
+    text-align: center;
+    font-size: 1rem;
+    color: #374151;
+    margin-bottom: 10px;
+}
+
+/* Ensure ResponsiveContainer has space */
+.recharts-responsive-container {
+    padding-top: 10px; 
+}
